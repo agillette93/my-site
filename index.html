@@ -56,9 +56,10 @@
 		}
 
 		.site-header {
-			display: flex;
+			display: grid;
+			grid-template-columns: auto auto 1fr;
 			align-items: center;
-			justify-content: space-between;
+			gap: 30px;
 			padding: 24px 0;
 			border-bottom: 1px solid var(--line);
 		}
@@ -71,6 +72,7 @@
 
 		.nav {
 			display: flex;
+			justify-self: end;
 			gap: 28px;
 			color: var(--muted);
 			font-family: var(--mono);
@@ -112,6 +114,61 @@
 		}
 
 		.hero-note p { margin: 0 0 32px; }
+
+		.weather-card {
+			justify-self: center;
+			width: min(250px, 100%);
+			margin: 0;
+			padding: 9px 12px;
+			border: 1px solid var(--ink);
+			background: var(--lime);
+			font-family: var(--mono);
+			font-size: 11px;
+			text-transform: uppercase;
+		}
+
+		.weather-card[data-state="error"] { background: var(--blue); }
+
+		.weather-heading {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			margin-bottom: 7px;
+			color: var(--muted);
+		}
+
+		.weather-label { color: var(--ink); }
+
+		.weather-main {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		.weather-emoji {
+			font-family: sans-serif;
+			font-size: 23px;
+			line-height: 1;
+		}
+
+		.weather-temperature {
+			font-family: var(--display);
+			font-size: 27px;
+			font-weight: 500;
+			letter-spacing: -.08em;
+			line-height: 1;
+		}
+
+		.weather-status { margin: 3px 0 0; }
+
+		.weather-help {
+			margin: 7px 0 0;
+			font-size: 9px;
+			line-height: 1.2;
+			text-transform: none;
+		}
+
+		.weather-help[hidden] { display: none; }
 
 		.scroll-link {
 			display: inline-flex;
@@ -292,7 +349,9 @@
 
 		@media (max-width: 700px) {
 			.shell { width: min(100% - 36px, 1320px); }
-			.nav { gap: 15px; }
+			.site-header { gap: 10px; }
+			.weather-card { width: 180px; }
+			.nav { gap: 12px; }
 			.nav a:nth-child(2) { display: none; }
 			.hero { display: block; min-height: auto; padding: 90px 0 96px; }
 			.hero h1 { font-size: clamp(66px, 20vw, 120px); }
@@ -311,6 +370,20 @@
 <body>
 	<header class="site-header shell">
 		<a class="wordmark" href="#top" aria-label="Alex home">A/</a>
+		<div class="weather-card" id="weather-card" data-state="loading" aria-live="polite">
+			<div class="weather-heading">
+				<span class="weather-label">Right now</span>
+				<span>Local weather</span>
+			</div>
+			<div class="weather-main">
+				<span class="weather-emoji" id="weather-emoji" aria-hidden="true">◌</span>
+				<div>
+					<div class="weather-temperature" id="weather-temperature">--°F</div>
+					<p class="weather-status" id="weather-status">Finding your weather...</p>
+				</div>
+			</div>
+			<p class="weather-help" id="weather-help" hidden>enable your location services to see the weather in your area</p>
+		</div>
 		<nav class="nav" aria-label="Main navigation">
 			<a href="#work">Work</a>
 			<a href="#about">About</a>
@@ -387,5 +460,59 @@
 			</footer>
 		</section>
 	</main>
+
+	<script>
+		const weatherCard = document.querySelector('#weather-card');
+		const weatherEmoji = document.querySelector('#weather-emoji');
+		const weatherTemperature = document.querySelector('#weather-temperature');
+		const weatherStatus = document.querySelector('#weather-status');
+		const weatherHelp = document.querySelector('#weather-help');
+		const brooklynFallback = {
+			coords: { latitude: 40.6862, longitude: -73.9907 }
+		};
+
+		const weatherConditions = (code) => {
+			if (code === 0) return { emoji: '☀️', label: 'Clear skies' };
+			if (code <= 3) return { emoji: '☁️', label: 'Partly cloudy' };
+			if (code <= 48) return { emoji: '🌫️', label: 'Misty' };
+			if (code <= 67 || (code >= 80 && code <= 82)) return { emoji: '🌧️', label: 'Rain nearby' };
+			if (code <= 77 || (code >= 85 && code <= 86)) return { emoji: '❄️', label: 'Snow nearby' };
+			if (code >= 95) return { emoji: '⛈️', label: 'Stormy skies' };
+			return { emoji: '🌤️', label: 'Changing skies' };
+		};
+
+		const showWeatherError = () => {
+			weatherCard.dataset.state = 'error';
+			weatherEmoji.textContent = '⌁';
+			weatherTemperature.textContent = '--°F';
+			weatherStatus.textContent = 'Location unavailable';
+		};
+
+		const loadWeather = async (position, locationLabel, isFallback = false) => {
+			const { latitude, longitude } = position.coords;
+			const endpoint = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`;
+			const response = await fetch(endpoint);
+			if (!response.ok) throw new Error('Weather request failed');
+
+			const data = await response.json();
+			const currentWeather = data.current;
+			const condition = weatherConditions(currentWeather.weather_code);
+			weatherCard.dataset.state = isFallback ? 'fallback' : 'ready';
+			weatherHelp.hidden = !isFallback;
+			weatherEmoji.textContent = condition.emoji;
+			weatherTemperature.textContent = `${Math.round(currentWeather.temperature_2m)}°F`;
+			weatherStatus.textContent = `${condition.label} · ${locationLabel}`;
+		};
+
+		if ('geolocation' in navigator) {
+			navigator.geolocation.getCurrentPosition(
+				(position) => loadWeather(position, 'Your location').catch(() => loadWeather(brooklynFallback, 'Brooklyn, NY', true).catch(showWeatherError)),
+				() => loadWeather(brooklynFallback, 'Brooklyn, NY', true).catch(showWeatherError),
+				{ enableHighAccuracy: false, maximumAge: 600000, timeout: 10000 }
+			);
+		} else {
+			loadWeather(brooklynFallback, 'Brooklyn, NY', true).catch(showWeatherError);
+		}
+	</script>
 </body>
 </html>
